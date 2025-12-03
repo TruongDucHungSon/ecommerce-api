@@ -22,6 +22,8 @@ router.delete("/:id", productController.deleteProduct);
 router.get("/:slug", productController.getProductDetail);
 // Lấy sản phẩm theo danh mục
 router.get("/category/:id", productController.getProductsByCategory);
+// lấy tổng sản phẩm trong cửa hàng
+router.get("/total-stock", productController.getTotalStock);
 
 // Bình luận và đánh giá sản phẩm
 router.post("/:slug/ratings", productController.addRatingAndComment);

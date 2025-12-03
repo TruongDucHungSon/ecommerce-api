@@ -1,7 +1,124 @@
 import { format } from "date-fns";
 import Order from "../models/oder.model.js";
+import qs from "qs";
+import crypto from "crypto";
 
-// Create a new order for a specific user
+// ---- Hàm sort chỉ khai báo 1 lần ----
+function sortObject(obj) {
+  let sorted = {};
+  let keys = Object.keys(obj).sort();
+  keys.forEach((key) => (sorted[key] = obj[key]));
+  return sorted;
+}
+
+export const createVNPayPayment = async (req, res) => {
+  try {
+    const ipAddr =
+      req.headers["x-forwarded-for"] ||
+      req.connection.remoteAddress ||
+      req.socket.remoteAddress ||
+      req.connection.socket?.remoteAddress;
+
+    const { orderId } = req.body;
+
+    // ---- Lấy total từ DB ----
+    const order = await Order.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    const amount = order.total; // Tổng tiền đơn hàng
+
+    const tmnCode = process.env.VNP_TMNCODE;
+    const secretKey = process.env.VNP_HASHSECRET;
+    let vnpUrl = process.env.VNP_URL;
+    const returnUrl = process.env.VNP_RETURNURL;
+
+    const date = new Date();
+    const createDate = `${date.getFullYear()}${(
+      "0" +
+      (date.getMonth() + 1)
+    ).slice(-2)}${("0" + date.getDate()).slice(-2)}${date
+      .getHours()
+      .toString()
+      .padStart(2, "0")}${date.getMinutes().toString().padStart(2, "0")}${date
+      .getSeconds()
+      .toString()
+      .padStart(2, "0")}`;
+
+    const vnpParams = {
+      vnp_Version: "2.1.0",
+      vnp_Command: "pay",
+      vnp_TmnCode: tmnCode,
+      vnp_Locale: "vn",
+      vnp_CurrCode: "VND",
+      vnp_TxnRef: orderId,
+      vnp_OrderInfo: "Thanh toán đơn hàng #" + orderId,
+      vnp_OrderType: "billpayment",
+      vnp_Amount: amount * 100,
+      vnp_ReturnUrl: returnUrl,
+      vnp_IpAddr: ipAddr,
+      vnp_CreateDate: createDate,
+    };
+
+    // ---- Ký dữ liệu ----
+    const sortedParams = sortObject(vnpParams);
+    const signData = qs.stringify(sortedParams, { encode: false });
+
+    const hmac = crypto.createHmac("sha512", secretKey);
+    const signed = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+
+    sortedParams["vnp_SecureHash"] = signed;
+
+    vnpUrl += "?" + qs.stringify(sortedParams, { encode: false });
+
+    return res.status(200).json({ paymentUrl: vnpUrl, amount });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json("Lỗi tạo thanh toán VNPay");
+  }
+};
+
+export const VNPayReturn = async (req, res) => {
+  try {
+    let vnpParams = req.query;
+    const secureHash = vnpParams.vnp_SecureHash;
+
+    delete vnpParams.vnp_SecureHash;
+    delete vnpParams.vnp_SecureHashType;
+
+    const secretKey = process.env.VNP_HASHSECRET;
+
+    const sorted = sortObject(vnpParams);
+    const signData = qs.stringify(sorted, { encode: false });
+
+    const checksum = crypto
+      .createHmac("sha512", secretKey)
+      .update(Buffer.from(signData, "utf-8"))
+      .digest("hex");
+
+    if (secureHash === checksum) {
+      const orderId = vnpParams.vnp_TxnRef;
+      const rspCode = vnpParams.vnp_ResponseCode;
+
+      if (rspCode === "00") {
+        await Order.findByIdAndUpdate(orderId, {
+          status: "Success",
+        });
+
+        return res.redirect(`/success?orderId=${orderId}`);
+      } else {
+        return res.redirect(`/fail?orderId=${orderId}`);
+      }
+    } else {
+      return res.json({ message: "Chữ ký không hợp lệ" });
+    }
+  } catch (error) {
+    console.log(error);
+    res.status(500).json("VNPay return error");
+  }
+};
+
+// =================== CRUD Order ===================
+
 export const createOrderForUser = async (req, res) => {
   try {
     const {
@@ -44,17 +161,15 @@ export const getAllOrders = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 export const filterOrderByStatus = async (req, res) => {
   try {
     const status = req.query.status;
     const query = {};
-    if (status != "All") {
-      query.status = status;
-    }
-    // // Retrieve all orders from the database
+    if (status !== "All") query.status = status;
+
     const orders = await Order.find(query).sort({ createdAt: -1 });
 
-    // Send the list of orders as the response
     res.status(200).json({ data: orders });
   } catch (error) {
     console.error(error);
@@ -64,14 +179,13 @@ export const filterOrderByStatus = async (req, res) => {
 
 export const updateStatusorder = async (req, res) => {
   try {
-    const { id, status } = req.body; // Ensure id is included in the request body
+    const { id, status } = req.body;
     const updatedOrder = await Order.findByIdAndUpdate(
-      id, // Only id is needed
+      id,
       { $set: { status } },
       { new: true }
     );
 
-    // Send the updated order as the response
     res.status(200).json({
       status: "Update order status successfully",
       data: updatedOrder,
@@ -81,10 +195,10 @@ export const updateStatusorder = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 export const getRevenueStatistics = async (req, res) => {
   try {
     const orders = await Order.find();
-
     const totalRevenue = orders.reduce((acc, order) => acc + order.total, 0);
 
     res.status(200).json({ totalRevenue });
@@ -98,7 +212,6 @@ export const getSoldProductsStatistics = async (req, res) => {
   try {
     const completedOrders = await Order.find({ status: "Success" });
 
-    // Tính tổng số lượng sản phẩm đã bán từ tất cả các đơn hàng đã hoàn tất
     const totalSoldProducts = completedOrders.reduce((acc, order) => {
       return (
         acc +
@@ -109,7 +222,6 @@ export const getSoldProductsStatistics = async (req, res) => {
       );
     }, 0);
 
-    // Gửi tổng số lượng sản phẩm đã bán như là phản hồi
     res.status(200).json({ totalSoldProducts });
   } catch (error) {
     console.error(error);
@@ -183,16 +295,12 @@ export const getSoldProductsStatisticsById = async (req, res) => {
 
 export const getOrderDetail = async (req, res) => {
   try {
-    const orderId = req.params.id;
-
-    // Tìm đơn hàng dựa trên ID
-    const order = await Order.findById(orderId);
+    const order = await Order.findOne({ _id: req.params.id });
 
     if (!order) {
       return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
     }
 
-    // Nếu tìm thấy, trả về thông tin đơn hàng
     res.status(200).json(order);
   } catch (error) {
     console.error(error);
@@ -204,14 +312,12 @@ export const deleteOrder = async (req, res) => {
   try {
     const orderId = req.params.id;
 
-    // Kiểm tra xem đơn hàng có tồn tại không
     const order = await Order.findById(orderId);
 
     if (!order) {
       return res.status(404).json({ message: "Đơn hàng không tồn tại." });
     }
 
-    // Thực hiện xóa đơn hàng
     await Order.findByIdAndDelete(orderId);
 
     res.status(204).json({ message: "Đơn hàng đã được xóa thành công." });

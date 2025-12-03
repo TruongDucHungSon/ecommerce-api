@@ -344,6 +344,27 @@ const productController = {
       res.status(500).json({ message: error.message });
     }
   },
+  // total stock
+  getTotalStock: async (req, res) => {
+    try {
+      const result = await Product.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalStock: { $sum: "$stock" },
+          },
+        },
+      ]);
+
+      const totalStock = result[0]?.totalStock || 0;
+
+      res.status(200).json({
+        totalStock,
+      });
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
 };
 
 export default productController;
