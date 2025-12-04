@@ -3,11 +3,12 @@ import Order from "../models/oder.model.js";
 import qs from "qs";
 import crypto from "crypto";
 
-// ---- Hàm sort chỉ khai báo 1 lần ----
+// Sort object alphabetically
 function sortObject(obj) {
-  let sorted = {};
-  let keys = Object.keys(obj).sort();
-  keys.forEach((key) => (sorted[key] = obj[key]));
+  const sorted = {};
+  Object.keys(obj)
+    .sort()
+    .forEach((key) => (sorted[key] = obj[key]));
   return sorted;
 }
 
@@ -21,11 +22,9 @@ export const createVNPayPayment = async (req, res) => {
 
     const { orderId } = req.body;
 
-    // ---- Lấy total từ DB ----
+    // Fetch order info
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ message: "Order not found" });
-
-    const amount = order.total; // Tổng tiền đơn hàng
 
     const tmnCode = process.env.VNP_TMNCODE;
     const secretKey = process.env.VNP_HASHSECRET;
@@ -33,16 +32,7 @@ export const createVNPayPayment = async (req, res) => {
     const returnUrl = process.env.VNP_RETURNURL;
 
     const date = new Date();
-    const createDate = `${date.getFullYear()}${(
-      "0" +
-      (date.getMonth() + 1)
-    ).slice(-2)}${("0" + date.getDate()).slice(-2)}${date
-      .getHours()
-      .toString()
-      .padStart(2, "0")}${date.getMinutes().toString().padStart(2, "0")}${date
-      .getSeconds()
-      .toString()
-      .padStart(2, "0")}`;
+    const createDate = format(date, "yyyyMMddHHmmss");
 
     const vnpParams = {
       vnp_Version: "2.1.0",
@@ -50,40 +40,45 @@ export const createVNPayPayment = async (req, res) => {
       vnp_TmnCode: tmnCode,
       vnp_Locale: "vn",
       vnp_CurrCode: "VND",
-      vnp_TxnRef: orderId,
-      vnp_OrderInfo: "Thanh toán đơn hàng #" + orderId,
+      vnp_TxnRef: orderId.toString(),
+      vnp_OrderInfo: encodeURIComponent(`Thanh toán đơn hàng #${orderId}`),
       vnp_OrderType: "billpayment",
-      vnp_Amount: amount * 100,
+      vnp_Amount: order.total * 100,
       vnp_ReturnUrl: returnUrl,
       vnp_IpAddr: ipAddr,
       vnp_CreateDate: createDate,
     };
 
-    // ---- Ký dữ liệu ----
+    // Sort + sign data
     const sortedParams = sortObject(vnpParams);
     const signData = qs.stringify(sortedParams, { encode: false });
 
-    const hmac = crypto.createHmac("sha512", secretKey);
-    const signed = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const signed = crypto
+      .createHmac("sha512", secretKey)
+      .update(signData, "utf-8")
+      .digest("hex");
 
     sortedParams["vnp_SecureHash"] = signed;
 
     vnpUrl += "?" + qs.stringify(sortedParams, { encode: false });
 
-    return res.status(200).json({ paymentUrl: vnpUrl, amount });
+    return res.status(200).json({ paymentUrl: vnpUrl });
   } catch (error) {
-    console.log(error);
+    console.error("VNPay create error:", error);
     res.status(500).json("Lỗi tạo thanh toán VNPay");
   }
 };
 
+// ===================================================
+// Callback VNPay return
+// ===================================================
 export const VNPayReturn = async (req, res) => {
   try {
     let vnpParams = req.query;
-    const secureHash = vnpParams.vnp_SecureHash;
 
-    delete vnpParams.vnp_SecureHash;
-    delete vnpParams.vnp_SecureHashType;
+    const secureHash = vnpParams["vnp_SecureHash"];
+    delete vnpParams["vnp_SecureHash"];
+    delete vnpParams["vnp_SecureHashType"];
 
     const secretKey = process.env.VNP_HASHSECRET;
 
@@ -92,13 +87,13 @@ export const VNPayReturn = async (req, res) => {
 
     const checksum = crypto
       .createHmac("sha512", secretKey)
-      .update(Buffer.from(signData, "utf-8"))
+      .update(signData, "utf-8")
       .digest("hex");
 
-    if (secureHash === checksum) {
-      const orderId = vnpParams.vnp_TxnRef;
-      const rspCode = vnpParams.vnp_ResponseCode;
+    const orderId = vnpParams.vnp_TxnRef;
+    const rspCode = vnpParams.vnp_ResponseCode;
 
+    if (secureHash === checksum) {
       if (rspCode === "00") {
         await Order.findByIdAndUpdate(orderId, {
           status: "Success",
@@ -108,11 +103,11 @@ export const VNPayReturn = async (req, res) => {
       } else {
         return res.redirect(`/fail?orderId=${orderId}`);
       }
-    } else {
-      return res.json({ message: "Chữ ký không hợp lệ" });
     }
+
+    return res.json({ message: "Chữ ký không hợp lệ" });
   } catch (error) {
-    console.log(error);
+    console.error(error);
     res.status(500).json("VNPay return error");
   }
 };
@@ -132,6 +127,7 @@ export const createOrderForUser = async (req, res) => {
       total,
       userId,
     } = req.body;
+
     const order = new Order({
       userId,
       name,
@@ -143,8 +139,11 @@ export const createOrderForUser = async (req, res) => {
       cartItems,
       total,
       status: "Pending",
+      createdAt: new Date(),
     });
+
     await order.save();
+
     res.status(201).json({ message: "success", order });
   } catch (error) {
     console.error(error);
@@ -169,7 +168,6 @@ export const filterOrderByStatus = async (req, res) => {
     if (status !== "All") query.status = status;
 
     const orders = await Order.find(query).sort({ createdAt: -1 });
-
     res.status(200).json({ data: orders });
   } catch (error) {
     console.error(error);
@@ -180,6 +178,7 @@ export const filterOrderByStatus = async (req, res) => {
 export const updateStatusorder = async (req, res) => {
   try {
     const { id, status } = req.body;
+
     const updatedOrder = await Order.findByIdAndUpdate(
       id,
       { $set: { status } },
@@ -198,8 +197,8 @@ export const updateStatusorder = async (req, res) => {
 
 export const getRevenueStatistics = async (req, res) => {
   try {
-    const orders = await Order.find();
-    const totalRevenue = orders.reduce((acc, order) => acc + order.total, 0);
+    const orders = await Order.find({ status: "Success" });
+    const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
 
     res.status(200).json({ totalRevenue });
   } catch (error) {
@@ -212,15 +211,11 @@ export const getSoldProductsStatistics = async (req, res) => {
   try {
     const completedOrders = await Order.find({ status: "Success" });
 
-    const totalSoldProducts = completedOrders.reduce((acc, order) => {
-      return (
-        acc +
-        order.cartItems.reduce(
-          (itemAcc, cartItem) => itemAcc + cartItem.quantity,
-          0
-        )
-      );
-    }, 0);
+    const totalSoldProducts = completedOrders.reduce(
+      (sum, order) =>
+        sum + order.cartItems.reduce((qty, item) => qty + item.quantity, 0),
+      0
+    );
 
     res.status(200).json({ totalSoldProducts });
   } catch (error) {
@@ -238,24 +233,17 @@ export const getSoldProductsByMonthAndYear = async (req, res) => {
     const monthlyStatistics = [];
 
     completedOrders.forEach((order) => {
-      const monthYearKey = format(new Date(order.createdAt), "yyyy-MM");
+      const key = format(new Date(order.createdAt), "yyyy-MM");
 
-      let exits = monthlyStatistics.find((item) => item.month === monthYearKey);
-
-      if (!exits) {
-        exits = {
-          month: monthYearKey,
-          total: 0,
-        };
-        monthlyStatistics.push(exits);
+      let row = monthlyStatistics.find((i) => i.month === key);
+      if (!row) {
+        row = { month: key, total: 0 };
+        monthlyStatistics.push(row);
       }
 
-      const orderQuantity = order.cartItems.reduce(
-        (itemAcc, cartItem) => itemAcc + cartItem.quantity,
-        0
-      );
+      const qty = order.cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
-      exits.total += orderQuantity;
+      row.total += qty;
     });
 
     res.status(200).json(monthlyStatistics);
@@ -295,11 +283,10 @@ export const getSoldProductsStatisticsById = async (req, res) => {
 
 export const getOrderDetail = async (req, res) => {
   try {
-    const order = await Order.findOne({ _id: req.params.id });
+    const order = await Order.findById(req.params.id);
 
-    if (!order) {
+    if (!order)
       return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
-    }
 
     res.status(200).json(order);
   } catch (error) {
@@ -310,17 +297,14 @@ export const getOrderDetail = async (req, res) => {
 
 export const deleteOrder = async (req, res) => {
   try {
-    const orderId = req.params.id;
+    const order = await Order.findById(req.params.id);
 
-    const order = await Order.findById(orderId);
-
-    if (!order) {
+    if (!order)
       return res.status(404).json({ message: "Đơn hàng không tồn tại." });
-    }
 
-    await Order.findByIdAndDelete(orderId);
+    await Order.findByIdAndDelete(req.params.id);
 
-    res.status(204).json({ message: "Đơn hàng đã được xóa thành công." });
+    res.status(200).json({ message: "Đơn hàng đã được xóa thành công." });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Lỗi trong quá trình xóa đơn hàng." });
