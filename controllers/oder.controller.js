@@ -216,31 +216,29 @@ export const createPayOSPayment = async (req, res) => {
       return res.status(400).json({ message: "Missing data" });
     }
 
-    // 🔥 Tạo mã orderCode PayOS
-    const orderCode = Math.floor(Math.random() * 999999);
-
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    // 🔥 Save order code vào DB
+    // 🔥 Tạo code ngắn gọn, <= 10 ký tự
+    const orderCode = `DH${Date.now().toString().slice(-6)}`;
     order.paymentCode = orderCode;
     await order.save();
 
     // 🔥 Tạo link thanh toán
     const paymentLink = await payos.paymentRequests.create({
-      orderCode: order._id,
-      amount: Number(amount),
-      description: `ĐH ${order._id.slice(0, 10)}`, // 🔥 <= max 25 ký tự
+      orderCode,
+      amount: Number(amount), // chắc chắn số nguyên
+      description: `ĐH ${order._id.toString().slice(-10)}`, // ≤25 ký tự
       returnUrl: process.env.PAYOS_RETURN_URL,
       cancelUrl: process.env.PAYOS_CANCEL_URL,
     });
 
     return res.status(200).json({
-      checkoutUrl: paymentLink.checkoutUrl, // 👈 field FE cần
+      checkoutUrl: paymentLink.checkoutUrl,
       orderCode,
     });
   } catch (err) {
-    console.log("PayOS error:", err);
+    console.error("PayOS error:", err);
     return res.status(500).json({ message: "Payment error" });
   }
 };
