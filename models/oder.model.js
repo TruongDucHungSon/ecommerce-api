@@ -57,14 +57,13 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: {
       type: String,
       enum: ["COD", "VNPay", "PayOS"],
-      default: "COD",
+      default: "PayOS",
     },
 
     // 🔥 Mã thanh toán PayOS / VNPay
     paymentCode: {
-      type: Number,
+      type: String, // thay vì Number
     },
-
     // 🔥 Mã giao dịch trả về từ cổng thanh toán
     transactionId: {
       type: String,

@@ -220,7 +220,7 @@ export const createPayOSPayment = async (req, res) => {
     if (!order) return res.status(404).json({ message: "Order not found" });
 
     // 🔥 Tạo code ngắn gọn, <= 10 ký tự
-    const orderCode = `DH${Date.now().toString().slice(-6)}`;
+    const orderCode = `Thanh toán`;
     order.paymentCode = orderCode;
     await order.save();
 
