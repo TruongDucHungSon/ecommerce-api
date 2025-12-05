@@ -228,7 +228,7 @@ export const createPayOSPayment = async (req, res) => {
     const paymentLink = await payos.paymentRequests.create({
       orderCode,
       amount: Number(amount), // chắc chắn số nguyên
-      description: `ĐH ${order._id.toString().slice(-10)}`, // ≤25 ký tự
+      description: `Thanh toán`, // ≤25 ký tự
       returnUrl: process.env.PAYOS_RETURN_URL,
       cancelUrl: process.env.PAYOS_CANCEL_URL,
     });
