@@ -227,12 +227,12 @@ export const createPayOSPayment = async (req, res) => {
     await order.save();
 
     // 🔥 Tạo link thanh toán
-    const paymentLink = await payos.createPaymentLink({
+    const paymentLink = await payos.paymentRequests.create({
       orderCode: orderCode,
       amount: Number(amount),
-      description: `Thanh toán đơn hàng ${orderId}`,
-      cancelUrl: process.env.PAYOS_CANCEL_URL,
+      description: `Thanh toán đơn hàng ${order._id}`,
       returnUrl: process.env.PAYOS_RETURN_URL,
+      cancelUrl: process.env.PAYOS_CANCEL_URL,
     });
 
     return res.status(200).json({
