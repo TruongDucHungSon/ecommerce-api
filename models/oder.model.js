@@ -62,7 +62,7 @@ const orderSchema = new mongoose.Schema(
 
     // 🔥 Mã thanh toán PayOS / VNPay
     paymentCode: {
-      type: String, // thay vì Number
+      type: Number, // thay vì Number
     },
     // 🔥 Mã giao dịch trả về từ cổng thanh toán
     transactionId: {
