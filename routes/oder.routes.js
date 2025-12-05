@@ -10,6 +10,8 @@ import {
   getSoldProductsStatistics,
   getSoldProductsStatisticsById,
   updateStatusorder,
+  createPayOSPayment,
+  PayOSWebhook,
 } from "../controllers/oder.controller.js";
 
 const router = express.Router();
@@ -27,4 +29,6 @@ router.delete("/:id", deleteOrder);
 router.get("/", getAllOrders);
 
 // payment VNPay
+router.post("/payos/create-payment", createPayOSPayment);
+router.post("/payos/webhook", PayOSWebhook);
 export default router;
