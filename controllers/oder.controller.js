@@ -210,39 +210,38 @@ export const deleteOrder = async (req, res) => {
 
 export const createPayOSPayment = async (req, res) => {
   try {
-    const { userId, name, phone, address, cartItems, total } = req.body;
+    const { orderId, amount } = req.body;
 
-    const order = await Order.create({
-      userId,
-      name,
-      phone,
-      address,
-      cartItems,
-      total,
-      status: "Pending",
-      paymentStatus: "Pending",
-      paymentMethod: "PayOS",
-      createdAt: new Date(),
-    });
+    if (!orderId || !amount) {
+      return res.status(400).json({ message: "Missing data" });
+    }
 
-    const orderCode = Number(Date.now().toString().slice(-6));
+    // 🔥 Tạo mã orderCode PayOS
+    const orderCode = Math.floor(Math.random() * 999999);
 
+    const order = await Order.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    // 🔥 Save order code vào DB
+    order.paymentCode = orderCode;
+    await order.save();
+
+    // 🔥 Tạo link thanh toán
     const paymentLink = await payos.createPaymentLink({
-      amount: total,
-      orderCode,
-      description: `ORDER#${order._id}`,
-      returnUrl: `process.env.PAYOS_RETURN_URL?orderId=${order._id}`,
-      cancelUrl: `process.env.CANCEL_URL?orderId=${order._id}`,
+      orderCode: orderCode,
+      amount: Number(amount),
+      description: `Thanh toán đơn hàng ${orderId}`,
+      cancelUrl: process.env.PAYOS_CANCEL_URL,
+      returnUrl: process.env.PAYOS_RETURN_URL,
     });
 
-    res.status(200).json({
-      message: "Tạo thanh toán PayOS thành công",
-      orderId: order._id,
-      paymentUrl: paymentLink.checkoutUrl,
+    return res.status(200).json({
+      checkoutUrl: paymentLink.checkoutUrl, // 👈 field FE cần
+      orderCode,
     });
-  } catch (error) {
-    console.error("PayOS Error:", error);
-    res.status(500).json({ message: "Lỗi tạo thanh toán PayOS" });
+  } catch (err) {
+    console.log("PayOS error:", err);
+    return res.status(500).json({ message: "Payment error" });
   }
 };
 
